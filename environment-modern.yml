@@ -1,0 +1,21 @@
+name: milp-ps
+channels:
+  - pytorch
+  - pyg
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - numpy
+  - scipy
+  - scikit-learn
+  - pandas
+  - networkx
+  - pyyaml
+  - tqdm
+  - pytorch=2.4.*
+  - cpuonly
+  - pyg=2.6.*
+  - pyscipopt=6.*
+  - pip:
+      - gurobipy>=13,<14

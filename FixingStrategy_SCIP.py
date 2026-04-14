@@ -12,8 +12,20 @@ torch.manual_seed(0)
 torch.cuda.manual_seed(0)
 
 #4 public datasets, IS, WA, CA, IP
-TaskName='IS'
+TaskName='CA'
 TestNum=100
+def resolve_instance_dir(task):
+    candidates = [
+        f'./instance/{task}/test',
+        f'./instance/{task.lower()}/test',
+        f'./instance/{task}',
+        f'./instance/{task.lower()}',
+    ]
+    for candidate in candidates:
+        if os.path.isdir(candidate):
+            return candidate
+    raise FileNotFoundError(f'No instance directory found for task {task}.')
+
 def test_hyperparam(task):
     '''
     set the hyperparams
@@ -50,21 +62,22 @@ else:
 model_name=f'{TaskName}.pth'
 pathstr = f'./models/{model_name}'
 policy = GNNPolicy().to(DEVICE)
-state = torch.load(pathstr, map_location=torch.device('cuda:0'))
+state = torch.load(pathstr, map_location=DEVICE)
 policy.load_state_dict(state)
 
 
-sample_names = sorted(os.listdir(f'./instance/{TaskName}'))
-for ins_num in range(TestNum):
+instance_dir = resolve_instance_dir(TaskName)
+sample_names = sorted(os.listdir(instance_dir))
+for ins_num in range(min(TestNum, len(sample_names))):
     test_ins_name = sample_names[ins_num]
-    ins_name_to_read = f'./instance/{TaskName}/{test_ins_name}'
+    ins_name_to_read = os.path.join(instance_dir, test_ins_name)
 
     #get bipartite graph as input
     A, v_map, v_nodes, c_nodes, b_vars=get_a_new2(ins_name_to_read)
     constraint_features = c_nodes.cpu()
     constraint_features[np.isnan(constraint_features)] = 1 #remove nan value
     variable_features = v_nodes
-        if TaskName == "IP":
+    if TaskName == "IP":
         variable_features = postion_get(variable_features)
     edge_indices = A._indices()
     edge_features = A._values().unsqueeze(1)
@@ -145,8 +158,6 @@ for ins_num in range(TestNum):
             m1.fixVar(tar_var, 0
                       )
     m1.optimize()
-
-
 
 
 
