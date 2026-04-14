@@ -201,7 +201,7 @@ class GraphDataset(torch_geometric.data.Dataset):
         edge_features =A._values().unsqueeze(1)
         edge_features=torch.ones(edge_features.shape)
         
-        constraint_features[np.isnan(constraint_features)] = 1
+        constraint_features[torch.isnan(constraint_features)] = 1
     
 
         graph = BipartiteNodeData(
@@ -410,6 +410,7 @@ class GraphDataset_position(torch_geometric.data.Dataset):
         v = torch.concat([variable_features, position_feature], dim=1)
 
         variable_features = v
+        constraint_features[torch.isnan(constraint_features)] = 1
 
         graph = BipartiteNodeData(
             torch.FloatTensor(constraint_features),
