@@ -66,13 +66,73 @@ Generated training assets are written under `dataset/`.
 
 ## Training
 
-Set `TaskName` in `trainPredictModel.py`, prepare the matching dataset folders, then run:
+Two training entry points are available:
 
 ```bash
-python trainPredictModel.py
+python trainPredictModel.py --task CA
+python train_improved.py --task CA
 ```
 
-Training outputs are written to `pretrain/` and `train_logs/`.
+`trainPredictModel.py` trains the baseline model from the original repository.
+
+`train_improved.py` trains an improved model that replaces the original node-feature MLP with a heterogeneous feature encoder inspired by DeepFM and AutoDis:
+
+- Discrete node features are mapped through `nn.Embedding` tables.
+- Continuous node features share learnable base embeddings and are encoded by value scaling.
+- All per-feature embeddings are concatenated and passed through an MLP to produce the 64-dimensional node input embedding.
+- The downstream bipartite GNN message-passing layers remain unchanged.
+
+The improved encoder is implemented in `GCN.py` as:
+
+- `EnhancedNodeEncoder`
+- `ImprovedGNNPolicy`
+
+Training outputs are written to `pretrain/` and `train_logs/`. The training scripts also save:
+
+- `metrics.csv` with per-epoch train/validation losses
+- `loss_curve.png` with the loss curve
+- `model_best.pth` and `model_last.pth`
+
+For GPU training, a typical command is:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 MPLCONFIGDIR=/tmp/matplotlib conda run -n milp-ps python trainPredictModel.py --task CA --epochs 100
+CUDA_VISIBLE_DEVICES=0 MPLCONFIGDIR=/tmp/matplotlib conda run -n milp-ps python train_improved.py --task CA --epochs 100
+```
+
+## Improved Model Notes
+
+The current feature split used by `ImprovedGNNPolicy` is:
+
+- Variable node features:
+  - continuous: `[obj, norm_coeff, degree, max_coeff, min_coeff]`
+  - discrete: `[is_binary]`
+- Constraint node features:
+  - continuous: `[mean_coeff, degree_or_nnz_proxy, rhs]`
+  - discrete: `[sense]`
+
+The improved encoder keeps the rest of the architecture identical to the baseline so that the comparison isolates the impact of the input feature encoding layer.
+
+## CA Results
+
+We trained both the baseline and improved models on the `CA` dataset using the split dataset layout:
+
+- train: `dataset/ca/train`
+- valid: `dataset/ca/valid`
+
+Current validation results on `CA`:
+
+- Baseline best validation loss: `632.8384` at epoch `94`
+- Improved best validation loss: `593.5681` at epoch `96`
+- Validation loss improvement: `39.2702`
+
+Saved artifacts:
+
+- Baseline best checkpoint: `pretrain/CA_train/model_best.pth`
+- Improved best checkpoint: `pretrain/CA_improved_train/model_best.pth`
+- Baseline metrics: `train_logs/CA_train/metrics.csv`
+- Improved metrics: `train_logs/CA_improved_train/metrics.csv`
+- Comparison curve: `train_logs/CA_compare/baseline_vs_improved.png`
 
 ## Evaluation
 

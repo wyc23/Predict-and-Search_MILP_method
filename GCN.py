@@ -7,6 +7,142 @@ import pickle
 import numpy as np
 import time
 
+
+class EnhancedNodeEncoder(torch.nn.Module):
+    def __init__(
+        self,
+        n_cont_features,
+        discrete_cardinalities,
+        emb_size=64,
+        feature_embed_dim=16,
+    ):
+        super().__init__()
+        self.n_cont_features = n_cont_features
+        self.discrete_cardinalities = discrete_cardinalities
+        self.feature_embed_dim = feature_embed_dim
+
+        if n_cont_features > 0:
+            self.cont_base_embeddings = torch.nn.Parameter(
+                torch.empty(n_cont_features, feature_embed_dim)
+            )
+            torch.nn.init.xavier_uniform_(self.cont_base_embeddings)
+        else:
+            self.register_parameter("cont_base_embeddings", None)
+
+        self.discrete_embeddings = torch.nn.ModuleList(
+            [
+                torch.nn.Embedding(cardinality, feature_embed_dim)
+                for cardinality in discrete_cardinalities
+            ]
+        )
+        for embedding in self.discrete_embeddings:
+            torch.nn.init.xavier_uniform_(embedding.weight)
+
+        total_features = n_cont_features + len(discrete_cardinalities)
+        input_dim = total_features * feature_embed_dim
+        self.interaction_mlp = torch.nn.Sequential(
+            torch.nn.LayerNorm(input_dim),
+            torch.nn.Linear(input_dim, emb_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(emb_size, emb_size),
+            torch.nn.ReLU(),
+        )
+
+    def forward(self, continuous_features, discrete_features):
+        feature_embeddings = []
+
+        if self.n_cont_features > 0:
+            cont_embeddings = (
+                continuous_features.unsqueeze(-1)
+                * self.cont_base_embeddings.unsqueeze(0)
+            )
+            feature_embeddings.append(cont_embeddings)
+
+        for feat_idx, embedding in enumerate(self.discrete_embeddings):
+            discrete_values = discrete_features[:, feat_idx].long()
+            discrete_values = discrete_values.clamp(
+                min=0, max=embedding.num_embeddings - 1
+            )
+            feature_embeddings.append(embedding(discrete_values).unsqueeze(1))
+
+        stacked_embeddings = torch.cat(feature_embeddings, dim=1)
+        return self.interaction_mlp(stacked_embeddings.reshape(stacked_embeddings.size(0), -1))
+
+
+class ImprovedGNNPolicy(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        emb_size = 64
+        edge_nfeats = 1
+
+        self.var_cont_indices = [0, 1, 2, 3, 4]
+        self.var_disc_indices = [5]
+        self.cons_cont_indices = [0, 1, 2]
+        self.cons_disc_indices = [3]
+
+        self.cons_embedding = EnhancedNodeEncoder(
+            n_cont_features=len(self.cons_cont_indices),
+            discrete_cardinalities=[3],
+            emb_size=emb_size,
+        )
+        self.edge_embedding = torch.nn.Sequential(
+            torch.nn.LayerNorm(edge_nfeats),
+        )
+        self.var_embedding = EnhancedNodeEncoder(
+            n_cont_features=len(self.var_cont_indices),
+            discrete_cardinalities=[2],
+            emb_size=emb_size,
+        )
+
+        self.conv_v_to_c = BipartiteGraphConvolution()
+        self.conv_c_to_v = BipartiteGraphConvolution()
+        self.conv_v_to_c2 = BipartiteGraphConvolution()
+        self.conv_c_to_v2 = BipartiteGraphConvolution()
+
+        self.output_module = torch.nn.Sequential(
+            torch.nn.Linear(emb_size, emb_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(emb_size, 1, bias=False),
+        )
+
+    def _split_var_features(self, variable_features):
+        continuous = variable_features[:, self.var_cont_indices]
+        discrete = variable_features[:, self.var_disc_indices]
+        return continuous, discrete
+
+    def _split_cons_features(self, constraint_features):
+        continuous = constraint_features[:, self.cons_cont_indices]
+        discrete = constraint_features[:, self.cons_disc_indices]
+        return continuous, discrete
+
+    def forward(
+        self, constraint_features, edge_indices, edge_features, variable_features
+    ):
+        reversed_edge_indices = torch.stack([edge_indices[1], edge_indices[0]], dim=0)
+
+        cons_continuous, cons_discrete = self._split_cons_features(constraint_features)
+        var_continuous, var_discrete = self._split_var_features(variable_features)
+
+        constraint_features = self.cons_embedding(cons_continuous, cons_discrete)
+        edge_features = self.edge_embedding(edge_features)
+        variable_features = self.var_embedding(var_continuous, var_discrete)
+
+        constraint_features = self.conv_v_to_c(
+            variable_features, reversed_edge_indices, edge_features, constraint_features
+        )
+        variable_features = self.conv_c_to_v(
+            constraint_features, edge_indices, edge_features, variable_features
+        )
+
+        constraint_features = self.conv_v_to_c2(
+            variable_features, reversed_edge_indices, edge_features, constraint_features
+        )
+        variable_features = self.conv_c_to_v2(
+            constraint_features, edge_indices, edge_features, variable_features
+        )
+
+        return self.output_module(variable_features).squeeze(-1)
+
 class GNNPolicy(torch.nn.Module):
     def __init__(self):
         super().__init__()
