@@ -56,7 +56,39 @@ After preparing raw instances, place them under the appropriate task directory i
 - `instance/<TASK>`
 - `instance/<task>`
 
-Then generate graph data and solutions with:
+Then generate graph data and solutions with `gurobi.py`.
+
+The current script supports:
+
+- selecting tasks with `--tasks`
+- selecting splits with `--splits`
+- skipping missing task/split directories instead of crashing
+- progress printing per split
+- incremental generation by default
+- forced regeneration with `--overwrite`
+- failed-instance summaries
+
+Example commands:
+
+```bash
+conda activate milp-ps
+
+# small CA smoke test
+python gurobi.py --tasks CA --splits train --nWorkers 2 --threads 1 --maxTime 60 --maxStoredSol 5
+
+# full CA generation
+python gurobi.py --tasks CA --splits train valid test --nWorkers 4 --threads 2 --maxTime 3600 --maxStoredSol 20
+```
+
+The generated files are written to:
+
+- `dataset/ca/train/{BG,solution,logs,NBP}`
+- `dataset/ca/valid/{BG,solution,logs,NBP}`
+- `dataset/ca/test/{BG,solution,logs,NBP}`
+
+If you want to regenerate existing artifacts, add `--overwrite`.
+
+The minimal invocation is still:
 
 ```bash
 python gurobi.py
@@ -144,6 +176,88 @@ python PredictAndSearch_GRB.py
 python FixingStrategy_SCIP.py
 ```
 
-By default the repository is configured around the `CA` assets that are currently present locally. If you switch tasks, update `TaskName` in the corresponding script and make sure the matching model checkpoint and instance directory exist.
+`PredictAndSearch_GRB.py` has been extended for downstream evaluation on Gurobi with three methods:
+
+- `baseline`: pure Gurobi solve
+- `baseline_gnn`: original GNN guided predict-and-search
+- `improved_gnn`: improved GNN guided predict-and-search
+
+GNN inference in `PredictAndSearch_GRB.py` is intentionally run on CPU so that downstream evaluation can use solver parallelism without competing for GPU resources.
+
+Typical usage:
+
+```bash
+conda activate milp-ps
+
+# debug run on 10 CA instances
+python PredictAndSearch_GRB.py \
+  --task CA \
+  --test-num 10 \
+  --mode all \
+  --n-workers 2 \
+  --solver-threads 1 \
+  --time-limit 300 \
+  --summary-name ca_debug_summary.csv
+
+# full run on 100 CA instances
+python PredictAndSearch_GRB.py \
+  --task CA \
+  --test-num 100 \
+  --mode all \
+  --n-workers 4 \
+  --solver-threads 1 \
+  --time-limit 1000 \
+  --summary-name ca_summary.csv
+```
+
+`--mode` supports:
+
+- `baseline`
+- `baseline_gnn`
+- `improved_gnn`
+- `learned`
+- `all`
+
+By default:
+
+- baseline GNN weights are loaded from `models/<TASK>.pth`
+- improved GNN weights are loaded from `pretrain/<TASK>_improved_train/model_best.pth`
+
+You can override them with:
+
+```bash
+python PredictAndSearch_GRB.py \
+  --task CA \
+  --mode all \
+  --baseline-model-path ./pretrain/CA_train/model_best.pth \
+  --improved-model-path ./pretrain/CA_improved_train/model_best.pth
+```
+
+Downstream logs are written to:
+
+- `logs/CA/CA_GRB_Baseline/`
+- `logs/CA/CA_GRB_BaselineGNN/`
+- `logs/CA/CA_GRB_ImprovedGNN/`
+- summary CSV: `logs/CA/<summary-name>`
+
+For quick aggregation of a GRB summary file, use:
+
+```bash
+python summarize_grb_results.py --summary logs/CA/ca_summary.csv
+```
+
+This script reports:
+
+- mean runtime
+- mean MIP gap
+- mean objective value
+- runtime win-rate
+- gap win-rate
+
+for:
+
+- `baseline_gnn` vs `baseline`
+- `improved_gnn` vs `baseline`
+- `improved_gnn` vs `baseline_gnn`
 
 Solver logs are written under `logs/`.
