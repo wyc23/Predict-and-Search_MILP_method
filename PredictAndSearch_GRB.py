@@ -69,6 +69,7 @@ def extract_gurobi_stats(model):
     has_incumbent = model.SolCount > 0
     return {
         "status": status,
+        "model_sense": "min" if model.ModelSense == 1 else "max",
         "runtime": float(model.Runtime),
         "obj_val": float(model.ObjVal) if has_incumbent else "",
         "obj_bound": float(model.ObjBound),
@@ -227,7 +228,7 @@ def evaluate_instance(
     improved_model_path,
 ):
     ins_name_to_read = os.path.join(instance_dir, instance_name)
-    row = {"instance": instance_name}
+    row = {"instance": instance_name, "instance_path": ins_name_to_read}
 
     for method in methods:
         log_path = os.path.join(log_dirs[method], f"{instance_name}.log")
@@ -244,6 +245,7 @@ def evaluate_instance(
                 baseline_model_path,
                 improved_model_path,
             )
+        row["objective_sense"] = result["model_sense"]
         for key, value in result.items():
             row[f"{method}_{key}"] = value
 

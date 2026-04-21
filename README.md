@@ -204,10 +204,33 @@ python PredictAndSearch_GRB.py \
   --task CA \
   --test-num 100 \
   --mode all \
-  --n-workers 4 \
+  --n-workers 96 \
   --solver-threads 1 \
   --time-limit 1000 \
   --summary-name ca_summary.csv
+```
+
+For CA test-set experiments, the repository also provides a convenience runner:
+
+```bash
+./run_ca_test100_grb_experiment.sh
+```
+
+It runs all three methods on `CA` test instances with:
+
+- `TEST_NUM=100`
+- `TIME_LIMIT=1000`
+- `SOLVER_THREADS=1`
+- `N_WORKERS=96`
+
+The defaults are chosen for a large multi-core machine so that each Gurobi solve uses a single thread while multiple instances run in parallel. You can override them through environment variables:
+
+```bash
+N_WORKERS=112 \
+TIME_LIMIT=1000 \
+SOLVER_THREADS=1 \
+SUMMARY_NAME=ca_test100_summary.csv \
+./run_ca_test100_grb_experiment.sh
 ```
 
 `--mode` supports:
@@ -240,6 +263,12 @@ Downstream logs are written to:
 - `logs/CA/CA_GRB_ImprovedGNN/`
 - summary CSV: `logs/CA/<summary-name>`
 
+`PredictAndSearch_GRB.py` now also stores lightweight metadata in the summary CSV, including:
+
+- `instance_path`
+- `objective_sense`
+- per-method `model_sense`
+
 For quick aggregation of a GRB summary file, use:
 
 ```bash
@@ -261,3 +290,34 @@ for:
 - `improved_gnn` vs `baseline_gnn`
 
 Solver logs are written under `logs/`.
+
+To analyze average best-objective-over-time curves from Gurobi logs, use:
+
+```bash
+python analyze_grb_objective_curves.py \
+  --task CA \
+  --summary ./logs/CA/ca_summary.csv \
+  --time-limit 1000 \
+  --step 1 \
+  --output-dir ./logs/CA/analysis_ca_test100
+```
+
+This script reads the real Gurobi `.log` files produced by `PredictAndSearch_GRB.py`, extracts the incumbent trajectory for each instance, and outputs:
+
+- `ca_mean_objective_curve.csv`
+- `ca_final_objective_summary.csv`
+- `ca_mean_objective_curve.png`
+
+If `matplotlib` is unavailable, the CSV files are still written and only the PNG plot is skipped.
+
+The convenience runner `run_ca_test100_grb_experiment.sh` executes both steps in sequence:
+
+1. `PredictAndSearch_GRB.py` for the three methods
+2. `analyze_grb_objective_curves.py` to generate the aggregated curve and final-objective summary
+
+A non-sandbox smoke test was run on `instance_1.lp` with `time-limit=30` and `solver-threads=1`, confirming that:
+
+- pure Gurobi solve works
+- baseline GNN guided solve works
+- improved GNN guided solve works
+- the offline analyzer correctly parses Gurobi 13 logs and produces the aggregated CSV/PNG outputs
