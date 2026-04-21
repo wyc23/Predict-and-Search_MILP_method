@@ -25,7 +25,6 @@ class EnhancedNodeEncoder(torch.nn.Module):
             self.cont_base_embeddings = torch.nn.Parameter(
                 torch.empty(n_cont_features, feature_embed_dim)
             )
-            torch.nn.init.xavier_uniform_(self.cont_base_embeddings)
         else:
             self.register_parameter("cont_base_embeddings", None)
 
@@ -35,11 +34,10 @@ class EnhancedNodeEncoder(torch.nn.Module):
                 for cardinality in discrete_cardinalities
             ]
         )
-        for embedding in self.discrete_embeddings:
-            torch.nn.init.xavier_uniform_(embedding.weight)
 
         total_features = n_cont_features + len(discrete_cardinalities)
-        input_dim = total_features * feature_embed_dim
+        self.num_pairwise_interactions = total_features * (total_features - 1) // 2
+        input_dim = total_features * feature_embed_dim + self.num_pairwise_interactions
         self.interaction_mlp = torch.nn.Sequential(
             torch.nn.LayerNorm(input_dim),
             torch.nn.Linear(input_dim, emb_size),
@@ -47,6 +45,17 @@ class EnhancedNodeEncoder(torch.nn.Module):
             torch.nn.Linear(emb_size, emb_size),
             torch.nn.ReLU(),
         )
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        if self.cont_base_embeddings is not None:
+            # Match embedding-style initialization so continuous and discrete
+            # feature tables start from the same prior distribution.
+            torch.nn.init.normal_(self.cont_base_embeddings)
+
+        for embedding in self.discrete_embeddings:
+            embedding.reset_parameters()
 
     def forward(self, continuous_features, discrete_features):
         feature_embeddings = []
@@ -66,7 +75,26 @@ class EnhancedNodeEncoder(torch.nn.Module):
             feature_embeddings.append(embedding(discrete_values).unsqueeze(1))
 
         stacked_embeddings = torch.cat(feature_embeddings, dim=1)
-        return self.interaction_mlp(stacked_embeddings.reshape(stacked_embeddings.size(0), -1))
+        flat_embeddings = stacked_embeddings.reshape(stacked_embeddings.size(0), -1)
+
+        if self.num_pairwise_interactions > 0:
+            pairwise_scores = torch.matmul(
+                stacked_embeddings, stacked_embeddings.transpose(1, 2)
+            )
+            pairwise_indices = torch.triu_indices(
+                stacked_embeddings.size(1),
+                stacked_embeddings.size(1),
+                offset=1,
+                device=stacked_embeddings.device,
+            )
+            pairwise_features = pairwise_scores[
+                :, pairwise_indices[0], pairwise_indices[1]
+            ]
+            interaction_input = torch.cat([flat_embeddings, pairwise_features], dim=1)
+        else:
+            interaction_input = flat_embeddings
+
+        return self.interaction_mlp(interaction_input)
 
 
 class ImprovedGNNPolicy(torch.nn.Module):
