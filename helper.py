@@ -13,7 +13,33 @@ import gurobipy as gp
 from gurobipy import GRB
 
 
-device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+# Keep graph/data extraction on CPU. Training and inference scripts move tensors
+# to CUDA explicitly when needed, while CPU here avoids CUDA re-init issues in
+# forked multiprocessing workers such as gurobi.py.
+device=torch.device("cpu")
+
+
+def safe_minmax_normalize(features, clamp_min=1e-5, clamp_max=1):
+    maxs = torch.max(features, 0)[0]
+    mins = torch.min(features, 0)[0]
+    diff = maxs - mins
+    for ks in range(diff.shape[0]):
+        if diff[ks] == 0:
+            diff[ks] = 1
+    features = features - mins
+    features = features / diff
+    features = torch.clamp(features, clamp_min, clamp_max)
+    return features
+
+
+def normalize_feature_block(features, continuous_indices, discrete_indices):
+    features = features.clone()
+    if continuous_indices:
+        cont = features[:, continuous_indices]
+        features[:, continuous_indices] = safe_minmax_normalize(cont)
+    if discrete_indices:
+        features[:, discrete_indices] = torch.round(features[:, discrete_indices])
+    return features
 
  
  
@@ -176,25 +202,20 @@ def get_BG_from_scip(ins_name):
     v_nodes[:,0]=torch.clamp(v_nodes[:,0],clip_min[0],clip_max[0])
     
     
-    maxs=torch.max(v_nodes,0)[0]
-    mins=torch.min(v_nodes,0)[0]
-    diff=maxs-mins
-    for ks in range(diff.shape[0]):
-        if diff[ks]==0:
-            diff[ks]=1
-    v_nodes=v_nodes-mins
-    v_nodes=v_nodes/diff
-    v_nodes=torch.clamp(v_nodes,1e-5,1)
+    v_nodes = normalize_feature_block(
+        v_nodes,
+        continuous_indices=[0, 1, 2, 3, 4],
+        discrete_indices=[5],
+    )
     #v_nodes=position_get_ordered(v_nodes)
     v_nodes=position_get_ordered_flt(v_nodes)
     
     
-    maxs=torch.max(c_nodes,0)[0]
-    mins=torch.min(c_nodes,0)[0]
-    diff=maxs-mins
-    c_nodes=c_nodes-mins
-    c_nodes=c_nodes/diff
-    c_nodes=torch.clamp(c_nodes,1e-5,1)
+    c_nodes = normalize_feature_block(
+        c_nodes,
+        continuous_indices=[0, 1, 2],
+        discrete_indices=[3],
+    )
     
     
     return A,v_map,v_nodes,c_nodes,b_vars       
@@ -324,25 +345,20 @@ def get_BG_from_GRB(ins_name):
     v_nodes[:,0]=torch.clamp(v_nodes[:,0],clip_min[0],clip_max[0])
     
     
-    maxs=torch.max(v_nodes,0)[0]
-    mins=torch.min(v_nodes,0)[0]
-    diff=maxs-mins
-    for ks in range(diff.shape[0]):
-        if diff[ks]==0:
-            diff[ks]=1
-    v_nodes=v_nodes-mins
-    v_nodes=v_nodes/diff
-    v_nodes=torch.clamp(v_nodes,1e-5,1)
+    v_nodes = normalize_feature_block(
+        v_nodes,
+        continuous_indices=[0, 1, 2, 3, 4],
+        discrete_indices=[5],
+    )
     #v_nodes=position_get_ordered(v_nodes)
     v_nodes=position_get_ordered_flt(v_nodes)
     
     
-    maxs=torch.max(c_nodes,0)[0]
-    mins=torch.min(c_nodes,0)[0]
-    diff=maxs-mins
-    c_nodes=c_nodes-mins
-    c_nodes=c_nodes/diff
-    c_nodes=torch.clamp(c_nodes,1e-5,1)
+    c_nodes = normalize_feature_block(
+        c_nodes,
+        continuous_indices=[0, 1, 2],
+        discrete_indices=[3],
+    )
     
     
     return A,v_map,v_nodes,c_nodes,b_vars       
@@ -466,24 +482,19 @@ def get_a_new2(ins_name):
 
     v_nodes[:, 0] = torch.clamp(v_nodes[:, 0], clip_min[0], clip_max[0])
 
-    maxs = torch.max(v_nodes, 0)[0]
-    mins = torch.min(v_nodes, 0)[0]
-    diff = maxs - mins
-    for ks in range(diff.shape[0]):
-        if diff[ks] == 0:
-            diff[ks] = 1
-    v_nodes = v_nodes - mins
-    v_nodes = v_nodes / diff
-    v_nodes = torch.clamp(v_nodes, 1e-5, 1)
+    v_nodes = normalize_feature_block(
+        v_nodes,
+        continuous_indices=[0, 1, 2, 3, 4],
+        discrete_indices=[5],
+    )
     # v_nodes=position_get_ordered(v_nodes)
     # v_nodes=position_get_ordered_flt(v_nodes)
 
-    maxs = torch.max(c_nodes, 0)[0]
-    mins = torch.min(c_nodes, 0)[0]
-    diff = maxs - mins
-    c_nodes = c_nodes - mins
-    c_nodes = c_nodes / diff
-    c_nodes = torch.clamp(c_nodes, 1e-5, 1)
+    c_nodes = normalize_feature_block(
+        c_nodes,
+        continuous_indices=[0, 1, 2],
+        discrete_indices=[3],
+    )
 
     return A, v_map, v_nodes, c_nodes, b_vars
 
